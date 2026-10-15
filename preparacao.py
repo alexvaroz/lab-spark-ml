@@ -35,6 +35,35 @@ def caminho_amostra(tipo, mes):
     return f"{DIR_AMOSTRAS}/{tipo}_{ANO}-{mes:02d}"
 
 
+def meses_com_amostra(spark, tipo):
+    """Meses que já têm amostra do tipo ("treino" ou "predicao") no HDFS,
+    consultando o HDFS direto pela API Java do Hadoop."""
+    jvm = spark._jvm
+    fs = jvm.org.apache.hadoop.fs.FileSystem.get(
+        jvm.java.net.URI(HDFS), spark._jsc.hadoopConfiguration())
+    padrao = jvm.org.apache.hadoop.fs.Path(f"{DIR_AMOSTRAS}/{tipo}_{ANO}-*/_SUCCESS")
+    encontrados = fs.globStatus(padrao) or []
+    # .../predicao_2024-04/_SUCCESS -> 4
+    return sorted(int(s.getPath().getParent().getName()[-2:]) for s in encontrados)
+
+
+def escolher_meses(spark, tipo, pedidos):
+    """Valida os meses pedidos contra as amostras existentes; sem pedido,
+    usa todos os meses que têm amostra."""
+    disponiveis = meses_com_amostra(spark, tipo)
+    if not disponiveis:
+        raise SystemExit(f"ERRO: nenhuma amostra de {tipo} em {DIR_AMOSTRAS}. "
+                         "Rode o setup.sh para gerá-las.")
+    if not pedidos:
+        return disponiveis
+    faltando = [m for m in pedidos if m not in disponiveis]
+    if faltando:
+        raise SystemExit(f"ERRO: sem amostra de {tipo} para o(s) mês(es) {faltando}. "
+                         f"Disponíveis: {disponiveis}. Gere com o setup.sh "
+                         f"(ex: MESES_PREDICAO=\"{' '.join(map(str, faltando))}\" ./setup.sh).")
+    return pedidos
+
+
 def caminho_modelo(nome):
     """nome: "preparacao", "pipeline_<modelo>", "melhor" ou "metadados"."""
     return f"{DIR_MODELOS}/{nome}"

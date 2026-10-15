@@ -24,8 +24,8 @@
 #   chmod +x setup.sh
 #   ./setup.sh
 #
-# Para usar outros meses, defina as variáveis na chamada (os mesmos meses
-# devem ser passados depois aos scripts com --mes / --meses):
+# Para usar outros meses, defina as variáveis na chamada. Os scripts de treino
+# e predição descobrem sozinhos as amostras geradas no HDFS:
 #   MES_TREINO=3 MESES_PREDICAO="4 8 11" ./setup.sh
 #
 # Pode rodar mais de uma vez sem problema (é idempotente): se os repositórios
@@ -399,9 +399,9 @@ SUBMIT="docker exec -it spark-master /spark/bin/spark-submit --master spark://sp
 echo ""
 echo "==> Cluster pronto. Próximos passos:"
 echo "    1) Treinar com o mês $MES_TREINO:"
-echo "       $SUBMIT /app/treino_regressao.py --mes $MES_TREINO"
+echo "       $SUBMIT /app/treino_regressao.py"
 echo "    2) Predição em batch nos meses $MESES_PREDICAO:"
-echo "       $SUBMIT /app/predicao_batch.py --meses $MESES_PREDICAO"
+echo "       $SUBMIT /app/predicao_batch.py"
 echo "    3) Trazer o CSV de predições para o Codespace:"
 echo "       ./exportar_resultados.sh"
 echo ""

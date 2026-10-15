@@ -9,8 +9,9 @@
 #
 # Execução:
 #   docker exec -it spark-master /spark/bin/spark-submit \
-#       --master spark://spark-master:7077 /app/predicao_batch.py --meses 2 6 12
-# Para usar um modelo específico em vez do melhor: --modelo gbt
+#       --master spark://spark-master:7077 /app/predicao_batch.py
+# Sem --meses, usa todos os meses com amostra de predição no HDFS.
+# Para escolher meses: --meses 2 6 12 | outro modelo em vez do melhor: --modelo gbt
 
 import argparse
 from functools import reduce
@@ -21,11 +22,11 @@ from pyspark.ml import PipelineModel
 from pyspark.ml.evaluation import RegressionEvaluator
 
 from preparacao import (HDFS, MODELOS, caminho_amostra, caminho_modelo,
-                        criar_atributos)
+                        criar_atributos, escolher_meses)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--meses", type=int, nargs="+", default=[2, 6, 12],
-                    help="meses a prever (precisam ter amostra gerada)")
+parser.add_argument("--meses", type=int, nargs="+",
+                    help="meses a prever (padrão: todos com amostra de predição no HDFS)")
 parser.add_argument("--modelo", default="melhor", choices=["melhor"] + MODELOS,
                     help="pipeline salvo pelo treino a ser usado")
 args = parser.parse_args()
@@ -49,6 +50,9 @@ caminho = caminho_modelo("melhor" if args.modelo == "melhor" else "pipeline_" + 
 print(f"Modelo treinado com o mês {metadados[0]['mes_treino']:02d}. Melhor no treino: {melhor}")
 print(f"Usando: {nome_modelo} ({caminho})")
 modelo = PipelineModel.load(caminho)
+
+args.meses = escolher_meses(spark, "predicao", args.meses)
+print(f"Meses da predição: {args.meses}")
 
 amostras = [spark.read.parquet(caminho_amostra("predicao", m)) for m in args.meses]
 df = criar_atributos(reduce(DataFrame.unionByName, amostras))

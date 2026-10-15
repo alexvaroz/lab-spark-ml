@@ -20,10 +20,11 @@ from pyspark.ml.regression import (LinearRegression, RandomForestRegressor,
 from pyspark.ml.evaluation import RegressionEvaluator
 
 from preparacao import (HDFS, COLUNAS_MODELO, caminho_amostra, caminho_modelo,
-                        criar_atributos)
+                        criar_atributos, escolher_meses)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mes", type=int, default=1, help="mês de treino (1-12)")
+parser.add_argument("--mes", type=int,
+                    help="mês de treino (padrão: o único com amostra de treino no HDFS)")
 args = parser.parse_args()
 
 SAIDA_METRICAS = HDFS + "/resultados/regressao_metricas"
@@ -36,6 +37,12 @@ spark = SparkSession.builder \
     .config("spark.sql.shuffle.partitions", "4") \
     .getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
+
+meses = escolher_meses(spark, "treino", [args.mes] if args.mes else None)
+if len(meses) > 1:
+    raise SystemExit(f"ERRO: há amostras de treino para os meses {meses}. "
+                     "Escolha um com --mes.")
+args.mes = meses[0]
 
 # ------------------------------------------------------------------------
 # Leitura da amostra (já limpa) e engenharia de atributos

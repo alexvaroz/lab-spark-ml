@@ -52,23 +52,25 @@ Site da TLC ──wget──► HDFS /dados/tlc/yellow_tripdata_2024-MM.parquet 
    MES_TREINO=3 MESES_PREDICAO="4 8 11" N_TREINO=200000 N_PREDICAO=10000 ./setup.sh
    ```
 
-   Se os meses mudarem, passe os mesmos meses aos scripts nos passos 3 e 4. As amostras que já existem não são refeitas. Para gerá-las de novo, por exemplo depois de mudar o tamanho, rode `REGERAR_AMOSTRAS=1 ./setup.sh`.
+   Não é preciso repetir os meses nos passos 3 e 4: os scripts descobrem sozinhos as amostras que existem no HDFS. As amostras que já existem não são refeitas. Para gerá-las de novo, por exemplo depois de mudar o tamanho, rode `REGERAR_AMOSTRAS=1 ./setup.sh`.
 
 3. **Etapa 1 — treino.** Treina com a amostra do mês de treino e salva os pipelines no HDFS:
 
    ```bash
    docker exec -it spark-master /spark/bin/spark-submit \
-       --master spark://spark-master:7077 /app/treino_regressao.py --mes 1
+       --master spark://spark-master:7077 /app/treino_regressao.py
    ```
+
+   Se houver amostras de treino de mais de um mês, escolha uma com `--mes 3`, por exemplo.
 
 4. **Etapa 2 — predição em batch.** Não treina nada: carrega o pipeline salvo e o aplica aos outros meses.
 
    ```bash
    docker exec -it spark-master /spark/bin/spark-submit \
-       --master spark://spark-master:7077 /app/predicao_batch.py --meses 2 6 12
+       --master spark://spark-master:7077 /app/predicao_batch.py
    ```
 
-   Por padrão, usa o melhor modelo do treino. Para usar outro, passe `--modelo linearregression`, `--modelo randomforest` ou `--modelo gbt`.
+   Sem `--meses`, a predição usa **todos** os meses com amostra de predição no HDFS, inclusive os de execuções anteriores do `setup.sh`. Para restringir, passe por exemplo `--meses 4`. Por padrão, usa o melhor modelo do treino. Para usar outro, passe `--modelo linearregression`, `--modelo randomforest` ou `--modelo gbt`.
 
 5. Traga os resultados para fora do HDFS:
 
