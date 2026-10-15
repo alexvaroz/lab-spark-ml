@@ -89,12 +89,47 @@ fi
 # 2/8 — Verificar o Docker
 # ------------------------------------------------------------------------
 echo "==> 2/8 Verificando o Docker..."
-if ! docker info > /dev/null 2>&1; then
-  echo "ERRO: o daemon do Docker não respondeu. No Codespaces, confirme que a"
-  echo "feature 'docker-in-docker' está no .devcontainer/devcontainer.json e"
-  echo "reconstrua o container (Codespaces -> Rebuild Container)."
+if ! command -v docker > /dev/null 2>&1; then
+  echo "ERRO: o comando 'docker' não existe neste ambiente. Isso indica que o"
+  echo "Codespace foi criado sem a feature 'docker-in-docker' (ex: antes do"
+  echo ".devcontainer/devcontainer.json existir no repositório). Reconstrua o"
+  echo "container: Ctrl+Shift+P -> 'Codespaces: Rebuild Container'."
   exit 1
 fi
+
+# Logo após o Codespace abrir, o dockerd pode ainda estar subindo -- ou pode
+# ter falhado no boot. Espera um pouco e, se não responder, tenta iniciá-lo
+# pelo entrypoint da feature docker-in-docker.
+if ! docker info > /dev/null 2>&1; then
+  echo "    Daemon do Docker ainda não respondeu -- aguardando até 30s..."
+  for _ in $(seq 1 15); do
+    docker info > /dev/null 2>&1 && break
+    sleep 2
+  done
+fi
+
+if ! docker info > /dev/null 2>&1; then
+  echo "    Tentando iniciar o daemon do Docker manualmente..."
+  if [ -x /usr/local/share/docker-init.sh ]; then
+    sudo /usr/local/share/docker-init.sh > /tmp/docker-init.log 2>&1 &
+  else
+    sudo service docker start > /tmp/docker-init.log 2>&1
+  fi
+  for _ in $(seq 1 15); do
+    docker info > /dev/null 2>&1 && break
+    sleep 2
+  done
+fi
+
+if ! docker info > /dev/null 2>&1; then
+  echo "ERRO: o daemon do Docker não respondeu. Mensagem do 'docker info':"
+  docker info 2>&1 | tail -5 | sed 's/^/      /'
+  echo "Log da tentativa de inicialização: /tmp/docker-init.log"
+  echo "Se persistir, reconstrua o container:"
+  echo "Ctrl+Shift+P -> 'Codespaces: Rebuild Container'."
+  exit 1
+fi
+echo "    Docker respondendo, ok."
 
 # ------------------------------------------------------------------------
 # 3/8 — Rede compartilhada entre os dois docker-compose
