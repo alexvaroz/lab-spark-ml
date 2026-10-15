@@ -21,6 +21,10 @@ from pyspark.ml.evaluation import RegressionEvaluator
 
 HDFS = "hdfs://namenode:9000"
 ARQUIVO_DADOS = HDFS + "/dados/nyc_tripdata_2024_sample_1M.csv"
+
+docker cp nyc_tripdata_2024_sample_1M.csv namenode:/tmp/
+docker exec namenode hdfs dfs -mkdir -p /dados
+docker exec namenode hdfs dfs -put -f /tmp/nyc_tripdata_2024_sample_1M.csv /dados/
 SAIDA_MODELO = HDFS + "/modelos/regressao_tarifa"
 SAIDA_METRICAS = HDFS + "/resultados/regressao_metricas"
 SAIDA_PREDICOES = HDFS + "/resultados/regressao_predicoes"
