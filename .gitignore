@@ -1,0 +1,5 @@
+# Base de dados baixada pelo setup.sh
+dados/
+# Repositórios clonados pelo setup.sh
+docker-hadoop/
+docker-spark/
