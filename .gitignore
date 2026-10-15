@@ -3,3 +3,5 @@ dados/
 # Repositórios clonados pelo setup.sh
 docker-hadoop/
 docker-spark/
+# CSVs exportados do HDFS por exportar_resultados.sh
+saida/

@@ -14,12 +14,19 @@
 #   2. Cria a rede compartilhada ANTES do docker-compose up, evitando o erro
 #      "UnknownHostException: namenode" entre os dois projetos separados.
 #   3. Instala o numpy nos containers Spark (exigido pelo pyspark.ml).
-#   4. Baixa a base NYC Taxi e a envia ao HDFS, se ainda não estiver lá.
-#   5. Copia o script de treino (treino_regressao.py) para o spark-master.
+#   4. Baixa do site da TLC os arquivos mensais (mês de treino + meses da
+#      predição em batch) e os envia ao HDFS, se ainda não estiverem lá.
+#   5. Copia os scripts Python para /app no spark-master.
+#   6. Gera no HDFS as amostras: 200.000 linhas do mês de treino e 10.000
+#      de cada mês da predição (job Spark gerar_amostras.py).
 #
 # Uso:
 #   chmod +x setup.sh
 #   ./setup.sh
+#
+# Para usar outros meses, defina as variáveis na chamada (os mesmos meses
+# devem ser passados depois aos scripts com --mes / --meses):
+#   MES_TREINO=3 MESES_PREDICAO="4 8 11" ./setup.sh
 #
 # Pode rodar mais de uma vez sem problema (é idempotente): se os repositórios
 # já estiverem clonados, não clona de novo; se a rede já existir, não recria;
@@ -29,15 +36,20 @@
 set -uo pipefail
 
 REDE="hadoop_spark_net"
-SCRIPT_SPARK="treino_regressao.py"
+SCRIPTS_SPARK="preparacao.py gerar_amostras.py treino_regressao.py predicao_batch.py"
 CONTAINERS_SPARK="spark-master spark-worker-1 spark-worker-2"
-ARQUIVO_DADOS="nyc_tripdata_2024_sample_1M.csv"
-URL_DADOS="https://huggingface.co/datasets/alexvaroz/nyc_taxi_trip_2024_p1_sample/resolve/main/$ARQUIVO_DADOS"
+ANO="2024"
+MES_TREINO="${MES_TREINO:-1}"
+MESES_PREDICAO="${MESES_PREDICAO:-2 6 12}"
+N_TREINO="${N_TREINO:-200000}"        # linhas da amostra de treino
+N_PREDICAO="${N_PREDICAO:-10000}"     # linhas da amostra de cada mês de predição
+URL_TLC="https://d37ci6vzurychx.cloudfront.net/trip-data"
+DIR_HDFS_TLC="/dados/tlc"
 
 # ------------------------------------------------------------------------
-# 1/8 — Corrigir problemas de rede do SO (ip_forward / iptables)
+# 1/9 — Corrigir problemas de rede do SO (ip_forward / iptables)
 # ------------------------------------------------------------------------
-echo "==> 1/8 Verificando compatibilidade de rede do host (ip_forward / iptables)..."
+echo "==> 1/9 Verificando compatibilidade de rede do host (ip_forward / iptables)..."
 
 if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null)" != "1" ]; then
   echo "    net.ipv4.ip_forward estava desligado -- ligando."
@@ -86,9 +98,9 @@ if [ "$PRECISA_AVISAR_RESET_MANUAL" = true ]; then
 fi
 
 # ------------------------------------------------------------------------
-# 2/8 — Verificar o Docker
+# 2/9 — Verificar o Docker
 # ------------------------------------------------------------------------
-echo "==> 2/8 Verificando o Docker..."
+echo "==> 2/9 Verificando o Docker..."
 if ! command -v docker > /dev/null 2>&1; then
   echo "ERRO: o comando 'docker' não existe neste ambiente. Isso indica que o"
   echo "Codespace foi criado sem a feature 'docker-in-docker' (ex: antes do"
@@ -132,9 +144,9 @@ fi
 echo "    Docker respondendo, ok."
 
 # ------------------------------------------------------------------------
-# 3/8 — Rede compartilhada entre os dois docker-compose
+# 3/9 — Rede compartilhada entre os dois docker-compose
 # ------------------------------------------------------------------------
-echo "==> 3/8 Criando a rede compartilhada '$REDE' (se ainda não existir)..."
+echo "==> 3/9 Criando a rede compartilhada '$REDE' (se ainda não existir)..."
 if docker network inspect "$REDE" > /dev/null 2>&1; then
   echo "    Rede '$REDE' já existe, seguindo."
 else
@@ -161,9 +173,9 @@ if ! docker network inspect "$REDE" > /dev/null 2>&1; then
 fi
 
 # ------------------------------------------------------------------------
-# 4/8 — Clonar os repositórios (se necessário) e aplicar o override de rede
+# 4/9 — Clonar os repositórios (se necessário) e aplicar o override de rede
 # ------------------------------------------------------------------------
-echo "==> 4/8 Clonando docker-hadoop e docker-spark (se necessário)..."
+echo "==> 4/9 Clonando docker-hadoop e docker-spark (se necessário)..."
 for REPO in docker-hadoop docker-spark; do
   if [ -f "$REPO/docker-compose.yml" ]; then
     echo "    '$REPO' já está presente, seguindo."
@@ -218,9 +230,9 @@ EOF
 fi
 
 # ------------------------------------------------------------------------
-# 5/8 — Subir os clusters e validar
+# 5/9 — Subir os clusters e validar
 # ------------------------------------------------------------------------
-echo "==> 5/8 Subindo os clusters..."
+echo "==> 5/9 Subindo os clusters..."
 ( cd docker-hadoop && docker-compose up -d )
 if [ $? -ne 0 ]; then
   echo "ERRO: falha ao subir o docker-hadoop (veja a mensagem acima)."
@@ -291,7 +303,7 @@ until docker exec spark-master curl -s http://localhost:8080 2>/dev/null | grep 
     echo "AVISO: nenhum worker apareceu como 'Alive' na UI do Spark Master ainda."
     echo "Se isso persistir, confira 'docker logs spark-worker-1' -- um sintoma"
     echo "comum é 'Retrying connection to master' em loop, que geralmente é o"
-    echo "mesmo problema de iptables corrigido no passo 1/8 (raro acontecer de"
+    echo "mesmo problema de iptables corrigido no passo 1/9 (raro acontecer de"
     echo "novo depois da correção, mas pode acontecer em outro Codespace)."
     break
   fi
@@ -302,13 +314,13 @@ if [ "$TENTATIVAS" -lt 15 ]; then
 fi
 
 # ------------------------------------------------------------------------
-# 6/8 — Instalar o numpy nos containers Spark
+# 6/9 — Instalar o numpy nos containers Spark
 # ------------------------------------------------------------------------
 # As imagens bde2020 (Alpine 3.10, Python 3.7) não trazem o numpy, mas o
 # pyspark.ml depende dele. Instalamos pelo apk (pacote já compilado; via pip
 # no Alpine seria uma compilação demorada). A instalação se perde se o
 # container for recriado, por isso este passo roda sempre.
-echo "==> 6/8 Instalando numpy nos containers Spark (necessário para o Spark ML)..."
+echo "==> 6/9 Instalando numpy nos containers Spark (necessário para o Spark ML)..."
 for C in $CONTAINERS_SPARK; do
   if docker exec "$C" python3 -c "import numpy" > /dev/null 2>&1; then
     echo "    $C: numpy já instalado."
@@ -321,39 +333,79 @@ for C in $CONTAINERS_SPARK; do
 done
 
 # ------------------------------------------------------------------------
-# 7/8 — Base de dados no HDFS
+# 7/9 — Arquivos mensais da TLC no HDFS
 # ------------------------------------------------------------------------
-echo "==> 7/8 Preparando a base de dados no HDFS..."
-if docker exec namenode hdfs dfs -test -e "/dados/$ARQUIVO_DADOS" 2>/dev/null; then
-  echo "    '/dados/$ARQUIVO_DADOS' já está no HDFS, seguindo."
-else
-  mkdir -p dados
-  if [ ! -s "dados/$ARQUIVO_DADOS" ]; then
-    echo "    Baixando a base (pode levar alguns minutos)..."
-    wget -q -O "dados/$ARQUIVO_DADOS" "$URL_DADOS" || {
-      echo "ERRO: falha ao baixar $URL_DADOS"
-      rm -f "dados/$ARQUIVO_DADOS"
-      exit 1
-    }
+echo "==> 7/9 Preparando os arquivos mensais da TLC no HDFS ($ANO)..."
+docker exec namenode hdfs dfs -mkdir -p "$DIR_HDFS_TLC"
+mkdir -p dados
+for MES in $MES_TREINO $MESES_PREDICAO; do
+  ARQUIVO=$(printf "yellow_tripdata_%s-%02d.parquet" "$ANO" "$((10#$MES))")
+  if docker exec namenode hdfs dfs -test -e "$DIR_HDFS_TLC/$ARQUIVO" 2>/dev/null; then
+    echo "    $ARQUIVO já está no HDFS, seguindo."
+    continue
   fi
-  docker cp "dados/$ARQUIVO_DADOS" "namenode:/tmp/$ARQUIVO_DADOS"
-  docker exec namenode hdfs dfs -mkdir -p /dados
-  docker exec namenode hdfs dfs -put -f "/tmp/$ARQUIVO_DADOS" /dados/
-  docker exec namenode rm -f "/tmp/$ARQUIVO_DADOS"
-  echo "    Base enviada para '/dados/$ARQUIVO_DADOS'."
+  if [ ! -s "dados/$ARQUIVO" ]; then
+    echo "    Baixando $ARQUIVO..."
+    if ! wget -q -O "dados/$ARQUIVO" "$URL_TLC/$ARQUIVO"; then
+      echo "ERRO: falha ao baixar $URL_TLC/$ARQUIVO"
+      rm -f "dados/$ARQUIVO"
+      exit 1
+    fi
+  fi
+  docker cp "dados/$ARQUIVO" "namenode:/tmp/$ARQUIVO"
+  docker exec namenode hdfs dfs -put -f "/tmp/$ARQUIVO" "$DIR_HDFS_TLC/"
+  docker exec namenode rm -f "/tmp/$ARQUIVO"
+  echo "    $ARQUIVO enviado para $DIR_HDFS_TLC."
+done
+
+# ------------------------------------------------------------------------
+# 8/9 — Copiar os scripts para o spark-master
+# ------------------------------------------------------------------------
+echo "==> 8/9 Copiando os scripts para /app no spark-master..."
+docker exec spark-master mkdir -p /app
+for S in $SCRIPTS_SPARK; do
+  docker cp "$S" "spark-master:/app/$S"
+done
+
+# ------------------------------------------------------------------------
+# 9/9 — Gerar as amostras de treino e de predição (job Spark no cluster)
+# ------------------------------------------------------------------------
+echo "==> 9/9 Gerando amostras: $N_TREINO linhas do mês $MES_TREINO (treino) e"
+echo "    $N_PREDICAO linhas de cada mês em '$MESES_PREDICAO' (predição)..."
+FALTA_AMOSTRA=false
+for PAR in "treino:$MES_TREINO" $(for M in $MESES_PREDICAO; do echo "predicao:$M"; done); do
+  AMOSTRA=$(printf "/dados/amostras/%s_%s-%02d" "${PAR%%:*}" "$ANO" "$((10#${PAR##*:}))")
+  if ! docker exec namenode hdfs dfs -test -e "$AMOSTRA/_SUCCESS" 2>/dev/null; then
+    FALTA_AMOSTRA=true
+  fi
+done
+
+if [ "$FALTA_AMOSTRA" = false ] && [ "${REGERAR_AMOSTRAS:-0}" != "1" ]; then
+  echo "    Amostras já existem no HDFS, seguindo."
+  echo "    (para gerar de novo, ex. após mudar o tamanho: REGERAR_AMOSTRAS=1 ./setup.sh)"
+elif ! docker exec spark-master /spark/bin/spark-submit \
+       --master spark://spark-master:7077 /app/gerar_amostras.py \
+       --mes-treino "$MES_TREINO" --n-treino "$N_TREINO" \
+       --meses $MESES_PREDICAO --n-predicao "$N_PREDICAO" 2>&1 \
+       | grep -E "^(treino|predicao) |Error|Exception"; then
+  echo "AVISO: não foi possível confirmar a geração das amostras. Rode o job"
+  echo "manualmente para ver a saída completa:"
+  echo "  docker exec -it spark-master /spark/bin/spark-submit --master spark://spark-master:7077 \\"
+  echo "    /app/gerar_amostras.py --mes-treino $MES_TREINO --n-treino $N_TREINO \\"
+  echo "    --meses $MESES_PREDICAO --n-predicao $N_PREDICAO"
 fi
 
-# ------------------------------------------------------------------------
-# 8/8 — Copiar o script de treino para o spark-master
-# ------------------------------------------------------------------------
-echo "==> 8/8 Copiando '$SCRIPT_SPARK' para o spark-master..."
-docker cp "$SCRIPT_SPARK" "spark-master:/$SCRIPT_SPARK"
-
+SUBMIT="docker exec -it spark-master /spark/bin/spark-submit --master spark://spark-master:7077"
 echo ""
-echo "==> Cluster pronto. Para treinar o modelo:"
-echo "    docker exec -it spark-master /spark/bin/spark-submit --master spark://spark-master:7077 /$SCRIPT_SPARK"
+echo "==> Cluster pronto. Próximos passos:"
+echo "    1) Treinar com o mês $MES_TREINO:"
+echo "       $SUBMIT /app/treino_regressao.py --mes $MES_TREINO"
+echo "    2) Predição em batch nos meses $MESES_PREDICAO:"
+echo "       $SUBMIT /app/predicao_batch.py --meses $MESES_PREDICAO"
+echo "    3) Trazer o CSV de predições para o Codespace:"
+echo "       ./exportar_resultados.sh"
 echo ""
 echo "    Interfaces web (aba 'Ports' do Codespace):"
 echo "    Namenode (HDFS)         -> porta 9870"
 echo "    Spark Master            -> porta 8080"
-echo "    Spark Application UI    -> porta 4040 (só durante o treino)"
+echo "    Spark Application UI    -> porta 4040 (só durante a execução)"
