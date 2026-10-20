@@ -16,6 +16,7 @@ Treina um modelo de regressão que prevê a tarifa (`fare_amount`) das corridas 
 | `predicao_batch.py` | **Etapa 2:** carrega um pipeline salvo e faz a predição nas amostras dos outros meses |
 | `exportar_resultados.sh` | Copia os CSVs de resultado do HDFS para a pasta `saida/` do Codespace |
 | `modelos.sh` | Exporta os modelos do HDFS para `modelos_salvos/` e os importa de volta |
+| `experimento_regressao_colab.ipynb` | O mesmo experimento completo em um notebook para o Google Colab, sem cluster: Spark local e disco no lugar do HDFS |
 
 ## Fluxo
 
